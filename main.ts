@@ -1,137 +1,166 @@
-import { App, Editor, MarkdownView, Modal, Notice, Plugin, PluginSettingTab, Setting } from 'obsidian';
-
-// Remember to rename these classes and interfaces!
+import { Editor, Plugin, TAbstractFile, TFile } from "obsidian";
+import {
+	isInstanceOf,
+	isNotNull,
+	isNotUndefined,
+	isNotVoid,
+} from "typed-assert";
 
 interface MyPluginSettings {
 	mySetting: string;
 }
 
 const DEFAULT_SETTINGS: MyPluginSettings = {
-	mySetting: 'default'
+	mySetting: "default",
+};
+
+interface LinkMetadata {
+	/**
+	 * foo#^bar
+	 */
+	link: string;
+
+	/**
+	 * ![[foo#^bar]]
+	 */
+	original: string;
+	position: {
+		start: {
+			offset: number;
+		};
+		end: {
+			offset: number;
+		};
+	};
+}
+
+declare module "obsidian" {
+	interface MetadataCache {
+		getBacklinksForFile: (file: TAbstractFile) => {
+			data: { [fileName: string]: Array<LinkMetadata> };
+		};
+	}
+}
+
+const HEADING_PATTERN = /^#+\s.+$/;
+const BLOCK_ID_PATTERN = /\s+(\^[a-zA-Z0-9-]+)$/gm;
+
+function getBlockIds(text: string) {
+	return [...text.matchAll(BLOCK_ID_PATTERN)].map((match) => match[1]);
+}
+
+function getHeadings(text: string) {
+	return text.split("\n").filter((line) => line.match(HEADING_PATTERN));
 }
 
 export default class MyPlugin extends Plugin {
-	settings: MyPluginSettings;
+	settings!: MyPluginSettings;
+	sourceFile?: TFile | null;
 
 	async onload() {
 		await this.loadSettings();
 
-		// This creates an icon in the left ribbon.
-		const ribbonIconEl = this.addRibbonIcon('dice', 'Sample Plugin', (evt: MouseEvent) => {
-			// Called when the user clicks the icon.
-			new Notice('This is a notice!');
-		});
-		// Perform additional things with the ribbon
-		ribbonIconEl.addClass('my-plugin-ribbon-class');
+		const body = document.querySelector("body");
+		isNotNull(body);
 
-		// This adds a status bar item to the bottom of the app. Does not work on mobile apps.
-		const statusBarItemEl = this.addStatusBarItem();
-		statusBarItemEl.setText('Status Bar Text');
-
-		// This adds a simple command that can be triggered anywhere
-		this.addCommand({
-			id: 'open-sample-modal-simple',
-			name: 'Open sample modal (simple)',
-			callback: () => {
-				new SampleModal(this.app).open();
-			}
-		});
-		// This adds an editor command that can perform some operation on the current editor instance
-		this.addCommand({
-			id: 'sample-editor-command',
-			name: 'Sample editor command',
-			editorCallback: (editor: Editor, view: MarkdownView) => {
-				console.log(editor.getSelection());
-				editor.replaceSelection('Sample Editor Command');
-			}
-		});
-		// This adds a complex command that can check whether the current state of the app allows execution of the command
-		this.addCommand({
-			id: 'open-sample-modal-complex',
-			name: 'Open sample modal (complex)',
-			checkCallback: (checking: boolean) => {
-				// Conditions to check
-				const markdownView = this.app.workspace.getActiveViewOfType(MarkdownView);
-				if (markdownView) {
-					// If checking is true, we're simply "checking" if the command can be run.
-					// If checking is false, then we want to actually perform the operation.
-					if (!checking) {
-						new SampleModal(this.app).open();
-					}
-
-					// This command will only show up in Command Palette when the check function returns true
-					return true;
-				}
-			}
+		this.registerDomEvent(body, "cut", () => {
+			this.sourceFile = this.app.workspace.getActiveFile();
 		});
 
-		// This adds a settings tab so the user can configure various aspects of the plugin
-		this.addSettingTab(new SampleSettingTab(this.app, this));
-
-		// If the plugin hooks up any global DOM events (on parts of the app that doesn't belong to this plugin)
-		// Using this function will automatically remove the event listener when this plugin is disabled.
-		this.registerDomEvent(document, 'click', (evt: MouseEvent) => {
-			console.log('click', evt);
-		});
-
-		// When registering intervals, this function will automatically clear the interval when the plugin is disabled.
-		this.registerInterval(window.setInterval(() => console.log('setInterval'), 5 * 60 * 1000));
+		this.app.workspace.on("editor-paste", this.handleEditorPaste);
 	}
 
-	onunload() {
+	private handleEditorPaste = async (
+		event: ClipboardEvent,
+		editor: Editor,
+		info: unknown
+	) => {
+		if (!this.sourceFile) {
+			return;
+		}
 
+		const text = event?.clipboardData?.getData("text");
+
+		if (!text) {
+			return;
+		}
+
+		const blockIdsInPastedText = getBlockIds(text);
+
+		if (blockIdsInPastedText.length === 0) {
+			return;
+		}
+
+		const file = this.app.vault.getAbstractFileByPath(this.sourceFile.path);
+		isNotNull(file);
+
+		const { data } = this.app.metadataCache.getBacklinksForFile(file);
+
+		Object.entries(data)
+			.map(([filePath, backlinksToSourceFile]) => ({
+				filePath,
+				links: backlinksToSourceFile.filter((linkData) =>
+					blockIdsInPastedText.some((id) =>
+						linkData.link.includes(id)
+					)
+				),
+			}))
+			.filter(({ links }) => links.length > 0)
+			.map(async ({ filePath, links }) => {
+				await this.updateFile(filePath, this.createLinkUpdater(links));
+			});
+	};
+
+	private async updateFile(path: string, callback: (old: string) => string) {
+		const fileToUpdate = this.app.vault.getAbstractFileByPath(path);
+		isInstanceOf(fileToUpdate, TFile);
+
+		const fileToUpdateText = await this.app.vault.read(fileToUpdate);
+		await this.app.vault.modify(fileToUpdate, callback(fileToUpdateText));
+	}
+
+	private createLinkUpdater(links: LinkMetadata[]) {
+		return (text: string) => {
+			return links.reduce(
+				(updatedText: string, linkData: LinkMetadata) => {
+					const { start, end } = linkData.position;
+					const linkStart = start.offset;
+					const linkEnd = end.offset;
+
+					isNotVoid(this.sourceFile);
+					const updatedLinkText = linkData.original.replace(
+						this.sourceFile.basename,
+						this.getActiveFileName()
+					);
+
+					return `${updatedText.substring(
+						0,
+						linkStart
+					)}${updatedLinkText}${updatedText.substring(linkEnd)}`;
+				},
+				text
+			);
+		};
+	}
+
+	private getActiveFileName() {
+		const activeFileName = this.app.workspace.getActiveFile()?.basename;
+		isNotUndefined(
+			activeFileName,
+			"Expected to be in some file while pasting"
+		);
+		return activeFileName;
 	}
 
 	async loadSettings() {
-		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+		this.settings = Object.assign(
+			{},
+			DEFAULT_SETTINGS,
+			await this.loadData()
+		);
 	}
 
 	async saveSettings() {
 		await this.saveData(this.settings);
-	}
-}
-
-class SampleModal extends Modal {
-	constructor(app: App) {
-		super(app);
-	}
-
-	onOpen() {
-		const {contentEl} = this;
-		contentEl.setText('Woah!');
-	}
-
-	onClose() {
-		const {contentEl} = this;
-		contentEl.empty();
-	}
-}
-
-class SampleSettingTab extends PluginSettingTab {
-	plugin: MyPlugin;
-
-	constructor(app: App, plugin: MyPlugin) {
-		super(app, plugin);
-		this.plugin = plugin;
-	}
-
-	display(): void {
-		const {containerEl} = this;
-
-		containerEl.empty();
-
-		containerEl.createEl('h2', {text: 'Settings for my awesome plugin.'});
-
-		new Setting(containerEl)
-			.setName('Setting #1')
-			.setDesc('It\'s a secret')
-			.addText(text => text
-				.setPlaceholder('Enter your secret')
-				.setValue(this.plugin.settings.mySetting)
-				.onChange(async (value) => {
-					console.log('Secret: ' + value);
-					this.plugin.settings.mySetting = value;
-					await this.plugin.saveSettings();
-				}));
 	}
 }
