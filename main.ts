@@ -42,20 +42,33 @@ declare module "obsidian" {
 	}
 }
 
-const HEADING_PATTERN = /^#+\s.+$/;
+const HEADING_PATTERN = /^#+\s.+$/gm;
 const BLOCK_ID_PATTERN = /\s+(\^[a-zA-Z0-9-]+)$/gm;
+const NOT_LETTER_OR_NUMBER_PATTERN = /[^\p{Letter}\p{Number}]/gu;
 
 function getBlockIds(text: string) {
 	return [...text.matchAll(BLOCK_ID_PATTERN)].map((match) => match[1]);
 }
 
 function getHeadings(text: string) {
-	return text.split("\n").filter((line) => line.match(HEADING_PATTERN));
+	return [...text.matchAll(HEADING_PATTERN)].map((match) => match[0]);
+}
+
+function normalizeHeading(text: string) {
+	return text.replaceAll(NOT_LETTER_OR_NUMBER_PATTERN, "");
+}
+
+function getNormalizedHeadingInLink(link: string) {
+	const headingPart = link.split("#")[1];
+	if (headingPart) {
+		return normalizeHeading(headingPart);
+	}
+	return null;
 }
 
 export default class MyPlugin extends Plugin {
 	settings!: MyPluginSettings;
-	sourceFile?: TFile | null;
+	sourceFile: TFile | null | undefined;
 
 	async onload() {
 		await this.loadSettings();
@@ -85,29 +98,37 @@ export default class MyPlugin extends Plugin {
 			return;
 		}
 
-		const blockIdsInPastedText = getBlockIds(text);
+		const blockIds = getBlockIds(text);
+		const headings = getHeadings(text);
 
-		if (blockIdsInPastedText.length === 0) {
+		if (blockIds.length === 0 && headings.length === 0) {
 			return;
 		}
 
 		const file = this.app.vault.getAbstractFileByPath(this.sourceFile.path);
 		isNotNull(file);
 
-		const { data } = this.app.metadataCache.getBacklinksForFile(file);
+		const backlinks = this.app.metadataCache.getBacklinksForFile(file).data;
 
-		Object.entries(data)
-			.map(([filePath, backlinksToSourceFile]) => ({
+		Object.entries(backlinks)
+			.map(([filePath, links]) => ({
 				filePath,
-				links: backlinksToSourceFile.filter((linkData) =>
-					blockIdsInPastedText.some((id) =>
-						linkData.link.includes(id)
-					)
+				links: links.filter(
+					({ link: linkText }) =>
+						blockIds.some((id) => linkText.includes(id)) ||
+						headings.some(
+							(heading) =>
+								getNormalizedHeadingInLink(linkText) ===
+								normalizeHeading(heading)
+						)
 				),
 			}))
 			.filter(({ links }) => links.length > 0)
 			.map(async ({ filePath, links }) => {
-				await this.updateFile(filePath, this.createLinkUpdater(links));
+				await this.updateFile(
+					filePath,
+					this.createLinkUpdateCallback(links)
+				);
 			});
 	};
 
@@ -119,24 +140,23 @@ export default class MyPlugin extends Plugin {
 		await this.app.vault.modify(fileToUpdate, callback(fileToUpdateText));
 	}
 
-	private createLinkUpdater(links: LinkMetadata[]) {
+	private createLinkUpdateCallback(links: LinkMetadata[]) {
 		return (text: string) => {
 			return links.reduce(
 				(updatedText: string, linkData: LinkMetadata) => {
-					const { start, end } = linkData.position;
-					const linkStart = start.offset;
-					const linkEnd = end.offset;
+					const start = linkData.position.start.offset;
+					const end = linkData.position.end.offset;
 
 					isNotVoid(this.sourceFile);
-					const updatedLinkText = linkData.original.replace(
+					const updated = linkData.original.replace(
 						this.sourceFile.basename,
 						this.getActiveFileName()
 					);
 
 					return `${updatedText.substring(
 						0,
-						linkStart
-					)}${updatedLinkText}${updatedText.substring(linkEnd)}`;
+						start
+					)}${updated}${updatedText.substring(end)}`;
 				},
 				text
 			);
