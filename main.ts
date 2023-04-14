@@ -1,5 +1,5 @@
 import { Plugin, TAbstractFile, TFile } from "obsidian";
-import { isInstanceOf, isNotNull, isNotUndefined } from "typed-assert";
+import { isInstanceOf, isNotNull } from "typed-assert";
 
 interface MyPluginSettings {
 	mySetting: string;
@@ -123,7 +123,10 @@ export default class MyPlugin extends Plugin {
 			.map(({ filePath, links }) =>
 				this.updateFile(
 					filePath,
-					this.createLinkUpdateCallback(filePath, links)
+					this.createLinkUpdateCallback(
+						this.getPathToActiveFileFrom(filePath),
+						links
+					)
 				)
 			);
 	};
@@ -140,7 +143,10 @@ export default class MyPlugin extends Plugin {
 		}, 10);
 	}
 
-	private createLinkUpdateCallback(filePath: string, links: LinkMetadata[]) {
+	private createLinkUpdateCallback(
+		pathToActiveFile: string,
+		links: LinkMetadata[]
+	) {
 		return (text: string) => {
 			return links
 				.slice()
@@ -155,10 +161,7 @@ export default class MyPlugin extends Plugin {
 
 						const updated = replaceFilePathInLink(
 							original,
-							this.app.metadataCache.fileToLinktext(
-								this.getActiveFile(),
-								filePath
-							)
+							pathToActiveFile
 						);
 
 						return `${updatedText.substring(
@@ -171,19 +174,17 @@ export default class MyPlugin extends Plugin {
 		};
 	}
 
+	private getPathToActiveFileFrom(sourcePath: string) {
+		return this.app.metadataCache.fileToLinktext(
+			this.getActiveFile(),
+			sourcePath
+		);
+	}
+
 	private getActiveFile() {
 		const activeFile = this.app.workspace.getActiveFile();
 		isNotNull(activeFile, "Expected to be in some file while pasting");
 		return activeFile;
-	}
-
-	private getActiveFileName() {
-		const activeFileName = this.app.workspace.getActiveFile()?.basename;
-		isNotUndefined(
-			activeFileName,
-			"Expected to be in some file while pasting"
-		);
-		return activeFileName;
 	}
 
 	async loadSettings() {
