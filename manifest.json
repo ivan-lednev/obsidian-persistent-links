@@ -1,11 +1,11 @@
 {
-	"id": "obsidian-persistent-links",
-	"name": "Persistent Links",
-	"version": "0.1.0",
-	"minAppVersion": "0.15.0",
-	"description": "TODO",
-	"author": "Obsidian",
-	"authorUrl": "https://obsidian.md",
-	"fundingUrl": "https://obsidian.md/pricing",
-	"isDesktopOnly": false
+  "id": "obsidian-persistent-links",
+  "name": "Persistent Links",
+  "version": "0.1.0",
+  "minAppVersion": "0.15.0",
+  "description": "Automatically repair internal links to blocks and headings",
+  "author": "Ivan Lednev",
+  "authorUrl": "https://github.com/ivan-lednev",
+  "fundingUrl": "https://www.buymeacoffee.com/machineelf",
+  "isDesktopOnly": false
 }
