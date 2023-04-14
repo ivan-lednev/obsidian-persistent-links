@@ -120,12 +120,12 @@ export default class MyPlugin extends Plugin {
 				),
 			}))
 			.filter(({ links }) => links.length > 0)
-			.map(async ({ filePath, links }) => {
-				await this.updateFile(
+			.map(({ filePath, links }) =>
+				this.updateFile(
 					filePath,
 					this.createLinkUpdateCallback(filePath, links)
-				);
-			});
+				)
+			);
 	};
 
 	private async updateFile(path: string, callback: (old: string) => string) {
