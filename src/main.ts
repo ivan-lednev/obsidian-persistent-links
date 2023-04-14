@@ -23,6 +23,10 @@ export default class PersistentLinksPlugin extends Plugin {
     this.app.workspace.on("editor-paste", this.handleEditorPaste);
   }
 
+  onunload() {
+    this.app.workspace.off("editor-paste", this.handleEditorPaste);
+  }
+
   private handleEditorPaste = async (event: ClipboardEvent) => {
     if (!this.sourceFile) {
       return;
