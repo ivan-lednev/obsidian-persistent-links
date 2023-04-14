@@ -1,4 +1,4 @@
-import { Plugin, TAbstractFile, TFile } from "obsidian";
+import { Editor, Plugin, TAbstractFile, TFile } from "obsidian";
 import { isInstanceOf, isNotNull } from "typed-assert";
 
 interface MyPluginSettings {
@@ -83,7 +83,7 @@ export default class MyPlugin extends Plugin {
     this.app.workspace.on("editor-paste", this.handleEditorPaste);
   }
 
-  private handleEditorPaste = async (event: ClipboardEvent) => {
+  private handleEditorPaste = async (event: ClipboardEvent, editor: Editor) => {
     if (!this.sourceFile) {
       return;
     }
@@ -106,29 +106,31 @@ export default class MyPlugin extends Plugin {
 
     const backlinks = this.app.metadataCache.getBacklinksForFile(file).data;
 
-    Object.entries(backlinks)
-      .map(([filePath, links]) => ({
-        filePath,
-        links: links.filter(
-          ({ link: linkText }) =>
-            blockIds.some((id) => linkText.includes(id)) ||
-            headings.some(
-              (heading) =>
-                getNormalizedHeadingInLink(linkText) ===
-                normalizeHeading(heading)
-            )
-        ),
-      }))
-      .filter(({ links }) => links.length > 0)
-      .map(({ filePath, links }) =>
-        this.updateFile(
+    await Promise.all(
+      Object.entries(backlinks)
+        .map(([filePath, links]) => ({
           filePath,
-          this.createLinkUpdateCallback(
-            this.getPathToActiveFileFrom(filePath),
-            links
+          links: links.filter(
+            ({ link: linkText }) =>
+              blockIds.some((id) => linkText.includes(id)) ||
+              headings.some(
+                (heading) =>
+                  getNormalizedHeadingInLink(linkText) ===
+                  normalizeHeading(heading)
+              )
+          ),
+        }))
+        .filter(({ links }) => links.length > 0)
+        .map(({ filePath, links }) =>
+          this.updateFile(
+            filePath,
+            this.createLinkUpdateCallback(
+              this.getPathToActiveFileFrom(filePath),
+              links
+            )
           )
         )
-      );
+    );
   };
 
   private async updateFile(path: string, callback: (old: string) => string) {
@@ -137,10 +139,11 @@ export default class MyPlugin extends Plugin {
 
     const fileToUpdateText = await this.app.vault.read(fileToUpdate);
 
-    // todo: this is just a hack
+    // First we need to insert the contents of the clipboard, and only then we can update files on disk. This is
+    // important when we need to update links in the file we paste into
     setTimeout(() => {
       this.app.vault.modify(fileToUpdate, callback(fileToUpdateText));
-    }, 10);
+    });
   }
 
   private createLinkUpdateCallback(
