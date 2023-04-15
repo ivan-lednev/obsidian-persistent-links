@@ -3,9 +3,13 @@ import { TAbstractFile } from "obsidian";
 declare module "obsidian" {
   interface MetadataCache {
     getBacklinksForFile: (file: TAbstractFile) => {
-      data: { [fileName: string]: Array<LinkMetadata> };
+      data: PathsWithLinks;
     };
   }
+}
+
+export interface PathsWithLinks {
+  [path: string]: LinkMetadata[];
 }
 
 export interface LinkMetadata {
