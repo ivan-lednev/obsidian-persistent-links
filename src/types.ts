@@ -1,33 +1,36 @@
-import { TAbstractFile } from "obsidian";
+import { CachedMetadata, LinkCache, TAbstractFile } from "obsidian";
 
 declare module "obsidian" {
   interface MetadataCache {
+    metadataCache: FileMetadata;
+    fileCache: FileCache;
+
     getBacklinksForFile: (file: TAbstractFile) => {
       data: PathsWithLinks;
     };
   }
 }
 
-export interface PathsWithLinks {
-  [path: string]: LinkMetadata[];
+interface FileCache {
+  [filePath: string]: {
+    hash: string;
+  };
 }
 
-export interface LinkMetadata {
-  /**
-   * foo#^bar
-   */
-  link: string;
+interface FileMetadata {
+  [fileHash: string]: CachedMetadata;
+}
 
-  /**
-   * ![[foo#^bar]]
-   */
-  original: string;
-  position: {
-    start: {
-      offset: number;
-    };
-    end: {
-      offset: number;
-    };
-  };
+export interface PathsWithLinks {
+  [path: string]: LinkCache[];
+}
+
+export interface LinkWithDestination {
+  link: LinkCache;
+  newPath: string;
+}
+
+export interface BrokenLinkResult {
+  fixable: LinkWithDestination[];
+  broken: LinkCache[];
 }

@@ -1,16 +1,27 @@
-import { Notice, Plugin, TFile } from "obsidian";
+import { Editor, LinkCache, Notice, Plugin, TFile } from "obsidian";
 import { isInstanceOf, isNotNull, isNotVoid } from "typed-assert";
-import { LinkMetadata } from "./types";
+import { BrokenLinkResult } from "./types";
 import {
-  createNotification,
+  createRepairNotice,
+  createUpdateNotice,
   filterLinksToItemsPresentInText,
-  redirectLinksInTextToNewPath,
+  isSubpathInMetadata,
+  parseLinkText,
+  redirectLinksInTextToNewPaths,
 } from "./utils";
 
 export default class PersistentLinksPlugin extends Plugin {
   sourceFile: TFile | null | undefined;
 
   async onload() {
+    this.addCommand({
+      id: "persistent-links:repair-links-in-file",
+      name: "Repair links in file",
+      editorCallback: (editor) => {
+        this.repairLinksInFile(editor);
+      },
+    });
+
     const body = document.querySelector("body");
     isNotNull(body);
 
@@ -24,6 +35,101 @@ export default class PersistentLinksPlugin extends Plugin {
   onunload() {
     this.app.workspace.off("editor-paste", this.handleEditorPaste);
   }
+
+  private repairLinksInFile(editor: Editor) {
+    const activeFileCache = this.app.metadataCache.getFileCache(
+      this.getActiveFile()
+    );
+
+    if (!activeFileCache) {
+      new Notice("Nothing to fix");
+      return;
+    }
+
+    const { links = [], embeds = [] } = activeFileCache;
+
+    const { fixable, broken } = this.findNewPathsForBrokenLinks([
+      ...links,
+      ...embeds,
+    ]);
+
+    if (fixable.length > 0) {
+      editor.setValue(
+        redirectLinksInTextToNewPaths(fixable, editor.getValue())
+      );
+    }
+
+    new Notice(createRepairNotice(fixable.length, broken.length));
+  }
+
+  private findNewPathsForBrokenLinks(links: LinkCache[]) {
+    return links
+      .map((link) => ({ link, ...parseLinkText(link.link) }))
+      .filter(({ subpath }) => subpath)
+      .filter(this.isLinkPathBroken)
+      .map(({ link, subpath }) => ({
+        link,
+        newPath: this.findFileWithSubpathInCache(subpath),
+      }))
+      .reduce(
+        (result: BrokenLinkResult, { link, newPath }) => {
+          newPath
+            ? result.fixable.push({ link, newPath })
+            : result.broken.push(link);
+          return result;
+        },
+        { fixable: [], broken: [] }
+      );
+  }
+
+  private findFileWithSubpathInCache(subpath: string) {
+    const found = Object.entries(this.app.metadataCache.fileCache).find(
+      ([, { hash }]) =>
+        isSubpathInMetadata(subpath, this.app.metadataCache.metadataCache[hash])
+    );
+
+    if (!found) {
+      return null;
+    }
+
+    const newPath = this.getFileFromPathRelativeToActiveFile(found[0]);
+
+    isNotNull(
+      newPath,
+      "Metadata cache contained a path that has the required subpath but doesn't point to a file"
+    );
+
+    return this.app.metadataCache.fileToLinktext(
+      newPath,
+      this.getActiveFile().path
+    );
+  }
+
+  private getFileFromPathRelativeToActiveFile(path: string) {
+    return this.app.metadataCache.getFirstLinkpathDest(
+      path,
+      this.getActiveFile().path
+    );
+  }
+
+  private isLinkPathBroken = ({
+    path,
+    subpath,
+  }: {
+    path: string;
+    subpath: string;
+  }) => {
+    const toFile = this.getFileFromPathRelativeToActiveFile(path);
+
+    if (toFile === null) {
+      return true;
+    }
+
+    return !isSubpathInMetadata(
+      subpath,
+      this.app.metadataCache.getFileCache(toFile)
+    );
+  };
 
   private handleEditorPaste = async (event: ClipboardEvent) => {
     if (!this.sourceFile) {
@@ -48,7 +154,7 @@ export default class PersistentLinksPlugin extends Plugin {
     this.runAfterMetadataUpdateIn(this.getActiveFile(), async () => {
       await this.redirectLinksToActiveFile(backlinksToUpdate);
 
-      new Notice(createNotification(backlinksToUpdate));
+      new Notice(createUpdateNotice(backlinksToUpdate));
     });
   };
 
@@ -59,14 +165,18 @@ export default class PersistentLinksPlugin extends Plugin {
   }
 
   private async redirectLinksToActiveFile(
-    links: Array<{ filePath: string; links: LinkMetadata[] }>
+    links: Array<{ filePath: string; links: LinkCache[] }>
   ) {
     return Promise.all(
       links.map(async ({ filePath, links }) => {
         const contents = await this.readFile(filePath);
-        const updatedContents = redirectLinksInTextToNewPath(
-          links,
-          this.getPathToActiveFileFrom(filePath),
+        const activeFilePath = this.getPathToActiveFileFrom(filePath);
+        const linksWithNewPath = links.map((link) => ({
+          link,
+          newPath: activeFilePath,
+        }));
+        const updatedContents = redirectLinksInTextToNewPaths(
+          linksWithNewPath,
           contents
         );
 
