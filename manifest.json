@@ -1,7 +1,7 @@
 {
   "id": "persistent-links",
   "name": "Persistent Links",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "minAppVersion": "0.15.0",
   "description": "Automatically repair internal links to blocks and headings",
   "author": "Ivan Lednev",
