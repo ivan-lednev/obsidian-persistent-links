@@ -3,23 +3,26 @@
 ## Purpose
 
 Suppose you have a file with backlinks to some of its headings or blocks. Normally if you move these linked-to headings
-and blocks, the links are going to break. This plugin listens to cut & paste events and tries to automatically update
-such links.
+and blocks, the links are going to break. The plugin tries to automatically update such links.
 
-Here is a demo:
+## How to use it
+
+Once you've enabled the plugin, it will automatically update links when you cut and paste headings and blocks. Here is a
+demo:
 ![](persistent-links-demo.gif)
 
-## How to use the plugin
-
-Just download and enable it. No configuration is required.
+If a file got updated in some other way, and you've noticed some broken links, you can use the "Repair links in file"
+command to fix them. The plugin will search through the metadata cache and try to find a file that contains the block or
+heading in the link.
 
 ## Limitations
 
+- Partially relies on internal Obsidian APIs, so it may break. If you noticed that, please create an issue
+- Automatically works only with cut & paste events
 - Only works with Wiki links
-- Only works with cut + paste events
 
 If you'd like the plugin to support other workflows, don't hesitate to create an
-issue: https://github.com/ivan-lednev/obsidian-persistent-links.
+issue: https://github.com/ivan-lednev/obsidian-persistent-links/issues.
 
 ## Contribution
 
