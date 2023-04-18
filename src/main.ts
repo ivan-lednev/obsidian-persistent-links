@@ -15,7 +15,7 @@ export default class PersistentLinksPlugin extends Plugin {
 
   async onload() {
     this.addCommand({
-      id: "persistent-links:repair-links-in-file",
+      id: "repair-links-in-file",
       name: "Repair links in file",
       editorCallback: (editor) => {
         this.repairLinksInFile(editor);
